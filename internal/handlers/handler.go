@@ -57,9 +57,24 @@ var questions = []Question{
 							Result: "AREAL",
 						},
 						{
-							Text:   "HER2 pos.",
-							Data:   "q1_1_option2",
-							Result: "CL011101223 (Перьета Р-фарм)",
+							Text: "HER2 pos.",
+							Data: "q1_1_option2",
+							NextQuestion: &Question{
+								ID:   "q1_1_1",
+								Text: "Выберите линию терапии:",
+								Options: []Option{
+									{
+										Text:   "1 линия терапии",
+										Data:   "q1_1_1_option1",
+										Result: "BCD-267-1",
+									},
+									{
+										Text:   "2 и последующие линии терапии",
+										Data:   "q1_1_1_option2",
+										Result: "CL011101223 (Перьета Р-фарм)",
+									},
+								},
+							},
 						},
 					},
 				},
