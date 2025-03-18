@@ -61,11 +61,6 @@ var questions = []Question{
 							Data:   "q1_1_option2",
 							Result: "CL011101223 (Перьета Р-фарм)",
 						},
-						{
-							Text:   "HER2 pos. ИГХ 3+/2+",
-							Data:   "q1_1_option3",
-							Result: "BCD-267-1 (Энхерту)",
-						},
 					},
 				},
 			},
@@ -84,7 +79,7 @@ var questions = []Question{
 						{
 							Text:   "2 линия",
 							Data:   "q2_1_option2",
-							Result: "генериум",
+							Result: "Generium",
 						},
 					},
 				},
