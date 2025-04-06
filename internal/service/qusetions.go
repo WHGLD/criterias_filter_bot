@@ -1,7 +1,7 @@
-package handlers
+package service
 
-// Список вопросов
-var questions = []Question{
+// Questions Список вопросов
+var Questions = []Question{
 	{
 		ID:   "q1",
 		Text: "Выберите нозологию",

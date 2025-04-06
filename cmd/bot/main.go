@@ -19,7 +19,7 @@ func main() {
 		log.Panic(err)
 	}
 
-	bot.Debug = true // Включаем отладку
+	bot.Debug = false // Включаем отладку
 
 	// Настраиваем канал обновлений
 	u := tgbotapi.NewUpdate(0)

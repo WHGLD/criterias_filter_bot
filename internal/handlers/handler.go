@@ -1,129 +1,117 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"log"
-	"sync"
+	"telegram-bot/internal/helper"
+
+	"telegram-bot/internal/service"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// UserAnswers Структура для хранения ответов пользователя
-type UserAnswers struct {
-	CurrentQuestion *Question
-	QuestionStack   []*Question
+type BotInterface interface {
+	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
-
-// Question Структура для вопроса
-type Question struct {
-	ID      string
-	Text    string
-	Options []Option
-}
-
-// Option Структура для варианта ответа
-type Option struct {
-	Text         string
-	Data         string
-	NextQuestion *Question // Следующий вопрос (если есть)
-	Result       string    // Итоговый результат (если это конечный ответ)
-}
-
-var (
-	userAnswersMap = make(map[int64]*UserAnswers)
-	lastMessageID  int
-	mu             sync.RWMutex
-)
 
 // HandleCallbackQuery Обработка нажатия Inline-кнопки
-func HandleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQuery) {
-	chatID := callbackQuery.Message.Chat.ID
-	userID := chatID
+func HandleCallbackQuery(bot BotInterface, callbackQuery *tgbotapi.CallbackQuery) {
+	var (
+		currentQuestion *service.Question
+		option          service.Option
+		chatID          int64
+	)
 
-	mu.Lock()
-	if _, ok := userAnswersMap[userID]; !ok {
-		userAnswersMap[userID] = &UserAnswers{}
-	}
-	mu.Unlock()
+	chatID = callbackQuery.Message.Chat.ID
+	surveyService := service.GetInstance()
 
 	if callbackQuery.Data == "start" {
-		mu.Lock()
-		userAnswersMap[chatID] = &UserAnswers{
-			CurrentQuestion: &questions[0], // Начинаем с первого вопроса
-		}
-		mu.Unlock()
-
-		editQuestion(bot, chatID, lastMessageID, &questions[0])
+		surveyService.Start(chatID)
+		editQuestion(
+			bot,
+			chatID,
+			surveyService.GetLastMessageID(chatID),
+			surveyService.GetCurrentQuestion(chatID),
+		)
 		return
 	}
 
 	if callbackQuery.Data == "back" {
-		mu.Lock()
-		if len(userAnswersMap[userID].QuestionStack) > 0 {
-			// Возвращаем предыдущий вопрос из стека
-			prevQuestion := userAnswersMap[userID].QuestionStack[len(userAnswersMap[userID].QuestionStack)-1]
-			userAnswersMap[userID].QuestionStack = userAnswersMap[userID].QuestionStack[:len(userAnswersMap[userID].QuestionStack)-1]
-			userAnswersMap[userID].CurrentQuestion = prevQuestion
-			mu.Unlock()
-			editQuestion(bot, chatID, lastMessageID, prevQuestion)
-		} else {
-			mu.Unlock()
+		if len(surveyService.GetQuestionsStack(chatID)) > 0 {
+			prevQuestion, err := surveyService.PopFromQuestionStack(chatID)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			if err = surveyService.SetCurrentQuestion(chatID, prevQuestion); err != nil {
+				log.Println(err)
+				return
+			}
+
+			editQuestion(bot, chatID, surveyService.GetLastMessageID(chatID), prevQuestion)
 		}
 		return
 	}
 
-	if userAnswersMap[userID].CurrentQuestion != nil {
-		for _, option := range userAnswersMap[userID].CurrentQuestion.Options {
-			if callbackQuery.Data == option.Data {
-				if option.Result != "" {
-					sendResults(
-						bot,
-						lastMessageID,
-						chatID,
-						option.Data,
-						option.Result,
-					)
-					mu.Lock()
-					delete(userAnswersMap, userID)
-					mu.Unlock()
-					return
-				}
+	currentQuestion = surveyService.GetCurrentQuestion(chatID)
+	if currentQuestion == nil {
+		// todo более осмысленная обработка
+		err := errors.New("currentQuestion == nil")
+		log.Println(err)
+		return
+	}
 
-				if option.NextQuestion != nil {
-					// Сохраняем текущий вопрос в стек
-					mu.Lock()
-					userAnswersMap[userID].QuestionStack = append(userAnswersMap[userID].QuestionStack, userAnswersMap[userID].CurrentQuestion)
-					userAnswersMap[userID].CurrentQuestion = option.NextQuestion
-					mu.Unlock()
-					editQuestion(bot, chatID, lastMessageID, userAnswersMap[userID].CurrentQuestion)
-				}
-				break
+	for _, option = range currentQuestion.Options {
+		if !option.Matches(callbackQuery.Data) {
+			continue
+		}
+
+		if option.IsTerminal() {
+			sendResults(bot, surveyService.GetLastMessageID(chatID), chatID, option.Data, option.Result)
+			surveyService.Reset(chatID)
+			return
+		}
+
+		if nextQuestion := option.GetNextQuestion(); nextQuestion != nil {
+			err := surveyService.SaveQuestionToStack(chatID, currentQuestion)
+			if err != nil {
+				log.Println(err)
+				return
 			}
+
+			if err = surveyService.SetCurrentQuestion(chatID, nextQuestion); err != nil {
+				log.Println(err)
+				return
+			}
+			editQuestion(bot, chatID, surveyService.GetLastMessageID(chatID), nextQuestion)
+			return
 		}
 	}
 
+	// todo более осмысленная обработка
 	callback := tgbotapi.NewCallback(callbackQuery.ID, "")
 	if _, err := bot.Request(callback); err != nil {
 		log.Println(err)
 	}
+	fmt.Println("")
+	fmt.Println("AFTER Request")
+	fmt.Println("")
 }
 
 // HandleMessage Обработка текстового сообщения
-func HandleMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	chatID := message.Chat.ID
-
+func HandleMessage(bot BotInterface, message *tgbotapi.Message) {
 	if message.Command() == "start" {
-		mu.Lock()
-		userAnswersMap[chatID] = &UserAnswers{
-			CurrentQuestion: &questions[0], // Начинаем с первого вопроса
-		}
-		mu.Unlock()
-		sendQuestion(bot, chatID, questions[0])
+		surveyService := service.GetInstance()
+		surveyService.Start(message.Chat.ID)
+		sendQuestion(bot, message.Chat.ID, *surveyService.GetCurrentQuestion(message.Chat.ID))
 	}
 }
 
 // Универсальная функция для отправки вопроса
-func sendQuestion(bot *tgbotapi.BotAPI, chatID int64, question Question) {
+func sendQuestion(bot BotInterface, chatID int64, question service.Question) {
 	keyboard := createKeyboard(&question, chatID)
 
 	msg := tgbotapi.NewMessage(chatID, question.Text)
@@ -134,11 +122,12 @@ func sendQuestion(bot *tgbotapi.BotAPI, chatID int64, question Question) {
 		return
 	}
 
-	lastMessageID = sentMsg.MessageID
+	surveyService := service.GetInstance()
+	surveyService.SetLastMessageID(chatID, sentMsg.MessageID)
 }
 
 // Универсальная функция для редактирования вопроса
-func editQuestion(bot *tgbotapi.BotAPI, chatID int64, messageID int, question *Question) {
+func editQuestion(bot BotInterface, chatID int64, messageID int, question *service.Question) {
 	keyboard := createKeyboard(question, chatID)
 
 	editMsg := tgbotapi.NewEditMessageTextAndMarkup(
@@ -154,7 +143,7 @@ func editQuestion(bot *tgbotapi.BotAPI, chatID int64, messageID int, question *Q
 }
 
 // Создание клавиатуры с кнопками
-func createKeyboard(question *Question, chatID int64) tgbotapi.InlineKeyboardMarkup {
+func createKeyboard(question *service.Question, chatID int64) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	// Кнопки вариантов ответа
@@ -165,27 +154,27 @@ func createKeyboard(question *Question, chatID int64) tgbotapi.InlineKeyboardMar
 	}
 
 	// Кнопка "Назад" если есть куда возвращаться
-	mu.Lock()
-	if _, ok := userAnswersMap[chatID]; ok && len(userAnswersMap[chatID].QuestionStack) > 0 {
+	surveyService := service.GetInstance()
+	currentQuestion := surveyService.GetCurrentQuestion(chatID)
+	if currentQuestion != nil && len(surveyService.GetQuestionsStack(chatID)) > 0 {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Назад", "back"),
 		))
 	}
-	mu.Unlock()
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-// sendResults отправка итогового результата с историей ответов
+// Отправка итогового результата с историей ответов
 func sendResults(
-	bot *tgbotapi.BotAPI,
+	bot BotInterface,
 	messageID int,
 	chatID int64,
 	resultOption string,
 	result string,
 ) {
 	messageText := fmt.Sprintf("✅ *Подходящее исследование:* %s", result)
-	messageText += "\n\n" + responseDescriptions[resultOption]
+	messageText += "\n\n" + service.ResponseDescriptions[resultOption]
 
 	// Создаем inline-кнопку "Начать заново"
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
@@ -197,10 +186,10 @@ func sendResults(
 	editMsg := tgbotapi.NewEditMessageTextAndMarkup(
 		chatID,
 		messageID,
-		messageText,
+		helper.EscapeMarkdownV2(messageText),
 		keyboard,
 	)
-	editMsg.ParseMode = "Markdown"
+	editMsg.ParseMode = "MarkdownV2"
 
 	if _, err := bot.Send(editMsg); err != nil {
 		log.Println("Error sending results:", err)
