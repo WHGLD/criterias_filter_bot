@@ -41,3 +41,5 @@ runcmd:
 
   # запустить в фоне
   nohup go run cmd/bot/main.go > output.log 2>&1 &
+
+  # запуск определенного теста // go test -race -run TestConcurrentUsers

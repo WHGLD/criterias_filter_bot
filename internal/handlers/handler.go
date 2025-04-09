@@ -58,7 +58,6 @@ func HandleCallbackQuery(bot BotInterface, callbackQuery *tgbotapi.CallbackQuery
 
 	currentQuestion = surveyService.GetCurrentQuestion(chatID)
 	if currentQuestion == nil {
-		// todo более осмысленная обработка
 		err := errors.New("currentQuestion == nil")
 		log.Println(err)
 		return
@@ -91,14 +90,10 @@ func HandleCallbackQuery(bot BotInterface, callbackQuery *tgbotapi.CallbackQuery
 		}
 	}
 
-	// todo более осмысленная обработка
 	callback := tgbotapi.NewCallback(callbackQuery.ID, "")
 	if _, err := bot.Request(callback); err != nil {
 		log.Println(err)
 	}
-	fmt.Println("")
-	fmt.Println("AFTER Request")
-	fmt.Println("")
 }
 
 // HandleMessage Обработка текстового сообщения
