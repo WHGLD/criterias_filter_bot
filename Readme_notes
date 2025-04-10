@@ -41,5 +41,8 @@ runcmd:
 
   # запустить в фоне
   nohup go run cmd/bot/main.go > output.log 2>&1 &
+  nohup ./criterias_filter_bot > output.log 2>&1 &
+
+  # GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=vendor -ldflags="-w -s" -o criterias_filter_bot
 
   # запуск определенного теста // go test -race -run TestConcurrentUsers
